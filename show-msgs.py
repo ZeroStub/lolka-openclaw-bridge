@@ -1,9 +1,11 @@
 import json, sys, urllib.request
 
-CH = sys.argv[1] if len(sys.argv) > 1 else 'CHANNEL_ID'
+CH = sys.argv[1] if len(sys.argv) > 1 else '926135074539520'
 LIMIT = sys.argv[2] if len(sys.argv) > 2 else '6'
 
-tok = open('/home/openclaw/.openclaw/workspace/lolka-channel/.token').read().strip()
+import os
+tok = (os.environ.get('LOLKA_BOT_TOKEN')
+       or open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.token')).read()).strip()
 scheme = 'B' + 'ot'
 hdr = {scheme.join(['Authorization' + ': ', ' ' + tok]) if False else 'Authorization': scheme + ' ' + tok}
 

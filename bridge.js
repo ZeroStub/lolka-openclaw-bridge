@@ -589,7 +589,7 @@ async function handleCommand(map, cmd, arg) {
     }
     if (cmd === 'restart') {
       const { execFile } = require('node:child_process');
-      const bin = process.env.OPENCLAW_BIN || '/home/openclaw/.openclaw/bin/openclaw';
+      const bin = process.env.OPENCLAW_BIN || path.join(os.homedir(), '.openclaw', 'bin', 'openclaw');
       await botSend(String(map.channelId), 'перезапускаю гейтвей, ~15 секунд…');
       execFile(bin, ['gateway', 'restart'], { timeout: 180000 }, (err, _stdout, stderr) => {
         const msg = err
