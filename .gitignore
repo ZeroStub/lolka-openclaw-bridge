@@ -1,0 +1,22 @@
+node_modules/
+package-lock.json
+
+# секреты и локальное состояние
+.token
+.token-*
+.appid
+.appid-*
+.owner.json
+.owner-*.json
+bridges.json
+bridges-*.json
+!bridges.example.json
+outbox.json
+outbox-*.json
+outbox-dead*.jsonl
+events.jsonl
+
+# логи и бэкапы
+*.log
+*.bak
+*.bak-*

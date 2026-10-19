@@ -1,0 +1,20 @@
+{
+  "name": "lolka-openclaw-bridge",
+  "version": "1.0.0",
+  "private": false,
+  "description": "Двусторонний мост между Lolka (lolka.app) и сессиями OpenClaw: канал Lolka ↔ сессия агента",
+  "type": "commonjs",
+  "license": "MIT",
+  "keywords": ["lolka", "openclaw", "bridge", "discord-alternative", "chatops"],
+  "scripts": {
+    "start": "node bridge.js",
+    "smoke": "node smoke.js",
+    "test:outbox": "node test-outbox.js"
+  },
+  "dependencies": {
+    "lolka.js": "^0.4.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

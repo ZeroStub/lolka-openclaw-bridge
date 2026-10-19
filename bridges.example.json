@@ -1,0 +1,13 @@
+{
+  "guildId": "000000000000000000",
+  "mappings": [
+    {
+      "channelId": "000000000000000001",
+      "name": "general",
+      "sessionKey": "agent:main:main",
+      "agentId": "main",
+      "webhookUrl": "",
+      "notices": true
+    }
+  ]
+}
