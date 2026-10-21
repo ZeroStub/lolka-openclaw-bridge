@@ -235,16 +235,18 @@ node bridge.js
 | `LOLKA_ADMINS` | пусто | дополнительные id, которым разрешены команды |
 | `LOLKA_BRIDGE_DEBUG` | — | `1` — сырые события в `events.jsonl` |
 | `LOLKA_BRIDGE_ALLOW_SELF_CMDS` | — | `1` — обрабатывать команды из сообщений самого бота |
-| `LOLKA_CTX_THRESHOLDS` | `80,95,100` | пороги плашки о контексте, % |
-| `LOLKA_CTX_SWEEP_MS` | `30000` | период проверки контекста |
-| `LOLKA_CTX_MIN_GAP_MS` | `300000` | минимальный интервал между плашками |
+| `LOLKA_CTX_THRESHOLDS` | `100` | пороги плашки о контексте, % |
+| `LOLKA_CTX_SWEEP_MS` | `300000` | период проверки контекста |
+| `LOLKA_CTX_MIN_GAP_MS` | `20000` | минимальный интервал между плашками |
 | `LOLKA_CTX_STUCK_MS` | `180000` | «чат молчит» — порог, мс |
 | `LOLKA_CTX_AUTOCOMPACT` | `1` | принудительная компакция при полном контексте |
-| `LOLKA_CTX_COMPACT_COOLDOWN_MS` | `300000` | пауза между компакциями |
+| `LOLKA_CTX_COMPACT_COOLDOWN_MS` | `600000` | пауза между компакциями |
+| `LOLKA_CTX_ONLY` | — | отладка: проверять контекст только для одного `channelId` |
+| `LOLKA_CTX_FORCE_NOTICE` | — | `1` — показывать плашку при любой проверке (отладка) |
 | `LOLKA_TOOL_STYLE` | `code` | оформление уведомлений |
 | `LOLKA_TOOL_TICKER` | `1` | тикер включён |
 | `LOLKA_TOOL_TICKER_MAX` | `15` | строк в окне тикера |
-| `LOLKA_TOOL_TICKER_FLUSH_MS` | `1500` | пауза перед дозаписью тикера |
+| `LOLKA_TOOL_TICKER_FLUSH_MS` | `900` | пауза перед дозаписью тикера |
 | `LOLKA_TOOL_SCRUB_LINKS` | `1` | вырезать ссылки из уведомлений |
 | `LOLKA_TYPING` | `1` | слать `typing` в канал |
 | `LOLKA_TYPING_EVERY_MS` | `8000` | период обновления индикатора |
@@ -255,6 +257,7 @@ node bridge.js
 | `LOLKA_RETRY_DELAYS` | `5,10,15,20,25` | задержки ретраев outbox, с |
 | `LOLKA_OUTBOX_PARK_MS` | `300000` | парковка буфера при сбое |
 | `LOLKA_SEND_TIMEOUT_MS` | `20000` | таймаут одного запроса к Lolka |
+| `LOLKA_WEBHOOK_URL` | — | URL вебхука для утилиты `webhook.js` (альтернатива `--url` и файлу `.webhook`) |
 
 ## Команды в чате
 

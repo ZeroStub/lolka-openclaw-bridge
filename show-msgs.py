@@ -1,6 +1,6 @@
 import json, sys, urllib.request
 
-CH = sys.argv[1] if len(sys.argv) > 1 else '926135074539520'
+CH = sys.argv[1] if len(sys.argv) > 1 else 'CHANNEL_ID'
 LIMIT = sys.argv[2] if len(sys.argv) > 2 else '6'
 
 import os
