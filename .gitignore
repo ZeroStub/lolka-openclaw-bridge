@@ -19,3 +19,7 @@ events.jsonl
 *.log
 *.bak
 *.bak-*
+
+# python
+__pycache__/
+*.pyc
