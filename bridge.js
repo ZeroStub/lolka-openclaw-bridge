@@ -13,6 +13,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('lolka.js');
 const { createOutbox } = require('./outbox');
+const { VoiceRoom } = require('./voice-room');
+const vt = require('./voice-targets');
 
 const DIR = __dirname;
 // Мультиинстанс: свой набор файлов на каждый экземпляр (второй бот и т.п.).
@@ -484,6 +486,7 @@ async function learnOwner() {
 }
 
 let ws = null, rid = 0;
+let voiceRoom = null;
 const waiters = new Map();
 function req(method, params, timeoutMs) {
   timeoutMs = timeoutMs || 20000;
@@ -558,6 +561,23 @@ function canUseCommands(_msg, a) {
   return isAdminId(a && a.id);
 }
 
+// Режим присутствия: минуты простоя до выхода. 0 = всегда в комнате.
+function voiceIdleMs() {
+  const raw = process.env.LOLKA_VOICE_IDLE_MIN;
+  if (raw === undefined || raw === '') return 5 * 60 * 1000;
+  const min = Number(raw);
+  if (!Number.isFinite(min) || min < 0) return 5 * 60 * 1000;
+  return Math.round(min * 60 * 1000);
+}
+
+function voiceIdleLabel(ms) {
+  return ms > 0 ? 'выходит после ' + Math.round(ms / 60000) + ' мин тишины' : 'всегда в комнате';
+}
+
+function voiceGuildList() {
+  return vt.listGuilds(lolka.guilds && lolka.guilds.cache);
+}
+
 async function handleCommand(map, cmd, arg) {
   const key = map.sessionKey;
   const extra = map.agentId ? { agentId: map.agentId } : {};
@@ -581,6 +601,10 @@ async function handleCommand(map, cmd, arg) {
         '`/ctxwarn [on|off]` - вкл/выкл плашку при заполнении контекста (порог по умолчанию 100%)',
         '`/ctxcompact [on|off]` - вкл/выкл принудительную компакцию при полном контексте',
         '`/chatadd [new|tree] [имя]` - новый чат в OpenClaw + новый канал в Lolka, привязанные друг к другу',
+        '`/vc rooms` - список серверов и голосовых каналов',
+        '`/vc idle [мин|0]` - выходить после стольких минут пустоты (0 = всегда в комнате)',
+        '`/vc join [канал] [сервер]` - войти в канал (по умолчанию — где сидит владелец)',
+        '`/vc status` / `/vc leave` - состояние / выйти из голоса',
         '`/help` - этот список',
         '',
         'Обычный текст уходит агенту. Уведомления о тул-вызовах и компакции включаются флагом `"notices": true` для канала в bridges.json.',
@@ -777,6 +801,75 @@ async function handleCommand(map, cmd, arg) {
       await botSend(String(map.channelId), 'принудительная компакция при полном контексте: ' + (map.ctxCompact === false ? 'выкл' : 'вкл') + (ok ? '' : ' (не сохранилось в bridges.json)'));
       return;
     }
+    if (cmd === 'vc' || cmd === 'voice') {
+      const parts = String(arg || '').trim().split(/\s+/).filter(Boolean);
+      const sub = (parts.shift() || 'status').toLowerCase();
+      if (sub === 'join') {
+        const target = vt.resolveVoiceTarget(voiceGuildList(), parts, { defaultGuildId: bridgeCfg.guildId, ownerId: OWNER && OWNER.id, envChannel: process.env.LOLKA_VOICE_CHANNEL });
+        if (target.error) { await botSend(String(map.channelId), target.error); return; }
+        const gId = String(target.guild.id);
+        const chId = String(target.channel.id);
+        const chName = target.channel.name || chId;
+        const gName = target.guild.name || gId;
+        try {
+          if (!voiceRoom) {
+            voiceRoom = new VoiceRoom({
+              client: lolka, guildId: gId, channelId: chId, req, idleLeaveMs: voiceIdleMs(),
+              log: m => log('[vc]', m),
+            });
+          } else if (voiceRoom.state === 'running') {
+            await botSend(String(map.channelId), 'уже в голосе: «' + voiceRoom.channelId + '». Сначала `/vc leave`.');
+            return;
+          }
+          voiceRoom.guildId = gId;
+          voiceRoom.channelId = chId;
+          voiceRoom.idleLeaveMs = voiceIdleMs();
+          await botSend(String(map.channelId), 'вхожу: «' + chName + '» на сервере «' + gName + '», поднимаю realtime-сессию…');
+          const st = await voiceRoom.start();
+          await botSend(String(map.channelId), '**в голосовом канале** «' + chName + '» (`' + st.channelId + '`) на «' + gName + '»\nсессия: `' + (st.sessionId || '—') + '`\nмодель: `' + (st.model || 'default') + '`\nрежим: ' + voiceIdleLabel(st.idleLeaveMs) + '\nГовори — услышу.');
+        } catch (e) {
+          log('[vc] join failed', e.message);
+          await botSend(String(map.channelId), 'не смог войти в голос: ' + String(e.message).slice(0, 300));
+        }
+        return;
+      }
+      if (sub === 'idle' || sub === 'mode') {
+        const raw = String(parts[0] || '').trim().toLowerCase();
+        if (!raw) {
+          const cur = voiceRoom ? voiceRoom.idleLeaveMs : voiceIdleMs();
+          await botSend(String(map.channelId), 'режим: ' + voiceIdleLabel(cur) + '\n`/vc idle 5` — выходить через 5 мин пустоты · `/vc idle 0` — не выходить никогда');
+          return;
+        }
+        const min = raw === 'always' ? 0 : Number(raw);
+        if (!Number.isFinite(min) || min < 0) { await botSend(String(map.channelId), 'укажи минуты: `/vc idle 5` или `/vc idle 0` (всегда)'); return; }
+        process.env.LOLKA_VOICE_IDLE_MIN = String(min);
+        if (voiceRoom) voiceRoom.idleLeaveMs = Math.round(min * 60000);
+        await botSend(String(map.channelId), 'режим: ' + voiceIdleLabel(Math.round(min * 60000)) + (voiceRoom ? ' (применён к текущей комнате)' : ''));
+        return;
+      }
+      if (sub === 'rooms' || sub === 'list') {
+        await botSend(String(map.channelId), vt.roomsReport(voiceGuildList(), { defaultGuildId: bridgeCfg.guildId, current: voiceRoom && voiceRoom.state !== 'idle' ? { guildId: voiceRoom.guildId, channelId: voiceRoom.channelId } : null }));
+        return;
+      }
+      if (sub === 'leave' || sub === 'stop') {
+        if (!voiceRoom) { await botSend(String(map.channelId), 'я не в голосовом канале'); return; }
+        await voiceRoom.stop();
+        await botSend(String(map.channelId), 'вышел из голосового канала');
+        return;
+      }
+      if (!voiceRoom) { await botSend(String(map.channelId), 'голос не подключён. `/vc rooms` — список комнат, `/vc join` — войти.'); return; }
+      const st = voiceRoom.status();
+      await botSend(String(map.channelId), [
+        '**голос:** ' + st.state,
+        'канал: `' + st.channelId + '` · сервер: `' + st.guildId + '`',
+        'в комнате людей: ' + st.humans + ' · ' + voiceIdleLabel(st.idleLeaveMs) + (st.emptyForMs ? ' · пусто ' + Math.round(st.emptyForMs / 1000) + ' с' : ''),
+        'сессия: `' + (st.sessionId || '—') + '`',
+        'собеседники: ' + (st.speakers.length ? st.speakers.join(', ') : '—'),
+        'вход: ' + st.inFrames + ' сэмплов · выход: ' + Math.round(st.outFrames) + ' кадров',
+        'события relay: ' + st.events + ' · в очереди: ' + st.queued + ' блоков',
+      ].join('\n'));
+      return;
+    }
     if (cmd === 'chatadd') {
       const parts = String(arg || '').trim().split(/\s+/).filter(Boolean);
       let mode = 'new';
@@ -806,7 +899,7 @@ async function handleCommand(map, cmd, arg) {
   }
 }
 
-const lolka = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+const lolka = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates] });
 
 lolka.once('ready', async c => {
   log('[lolka] ready as ' + c.user.username + ', mappings: ' + MAPPINGS.length);
@@ -968,6 +1061,10 @@ function connectGateway() {
       return;
     }
 
+    if (f.type === 'event' && f.event === 'talk.event') {
+      if (voiceRoom && voiceRoom.state !== 'idle') voiceRoom.onTalkEvent(f.payload || {});
+      return;
+    }
     if (f.type === 'event' && (f.event === 'session.operation' || f.event === 'agent')) {
       const p = f.payload || {};
       const map = bySession.get(p.sessionKey);
