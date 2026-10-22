@@ -14,4 +14,5 @@ jobs:
           node-version: 22
       - run: npm install
       - run: node --check bridge.js
+      - run: npm run check:requires
       - run: npm run test:outbox

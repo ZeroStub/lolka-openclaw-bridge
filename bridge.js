@@ -14,8 +14,12 @@ const path = require('node:path');
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('lolka.js');
 const { createOutbox } = require('./outbox');
 const { createMediaTools } = require('./media');
-const { VoiceRoom } = require('./voice-room');
-const vt = require('./voice-targets');
+// Голосовые модули опциональны: в публичной поставке их может не быть,
+// поэтому подключаем мягко — без них мост работает в текстовом режиме.
+let VoiceRoom = null;
+let vt = null;
+try { ({ VoiceRoom } = require('./voice-room')); } catch (e) { VoiceRoom = null; }
+try { vt = require('./voice-targets'); } catch (e) { vt = null; }
 
 const DIR = __dirname;
 // Мультиинстанс: свой набор файлов на каждый экземпляр (второй бот и т.п.).
@@ -600,7 +604,7 @@ function voiceIdleLabel(ms) {
 }
 
 function voiceGuildList() {
-  return vt.listGuilds(lolka.guilds && lolka.guilds.cache);
+  return vt ? vt.listGuilds(lolka.guilds && lolka.guilds.cache) : [];
 }
 
 async function handleCommand(map, cmd, arg) {
@@ -828,6 +832,10 @@ async function handleCommand(map, cmd, arg) {
       return;
     }
     if (cmd === 'vc' || cmd === 'voice') {
+      if (!vt || !VoiceRoom) {
+        await botSend(String(map.channelId), 'голос не подключён в этой сборке: нужны voice-room.js и voice-targets.js');
+        return;
+      }
       const parts = String(arg || '').trim().split(/\s+/).filter(Boolean);
       const sub = (parts.shift() || 'status').toLowerCase();
       if (sub === 'join') {
