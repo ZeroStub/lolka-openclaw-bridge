@@ -13,6 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('lolka.js');
 const { createOutbox } = require('./outbox');
+const { createMediaTools } = require('./media');
 const { VoiceRoom } = require('./voice-room');
 const vt = require('./voice-targets');
 
@@ -229,7 +230,12 @@ function sendFinal(map, text) {
     typingCancelFallback(id);
     typingStop(id);
     tickerClose(map); // закрываем блок-тикер тул-вызовов, если он открыт
-    botSend(id, text).catch(e => log('[lolka] send error', e.message));
+    const media = extractMedia(text);
+    if (media.files.length) {
+      sendMediaFiles(map, media.files, media.text).catch(e => log('[media] send error', e.message));
+      return;
+    }
+    botSend(id, media.text || text).catch(e => log('[lolka] send error', e.message));
   };
   if (wait > 0) { const h = setTimeout(send, wait); if (h.unref) h.unref(); } else send();
 }
@@ -488,13 +494,23 @@ async function learnOwner() {
 let ws = null, rid = 0;
 let voiceRoom = null;
 const waiters = new Map();
+const SLOW_RPC_MS = 1500;
 function req(method, params, timeoutMs) {
   timeoutMs = timeoutMs || 20000;
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== 1) return reject(new Error('gateway not connected'));
     const id = 'r' + (++rid);
+    const t0 = Date.now();
     const t = setTimeout(() => { waiters.delete(id); reject(new Error('timeout: ' + method)); }, timeoutMs);
-    waiters.set(id, { resolve: v => { clearTimeout(t); resolve(v); }, reject: e => { clearTimeout(t); reject(e); } });
+    const watched = method !== 'talk.session.appendAudio';
+    waiters.set(id, {
+      resolve: v => {
+        clearTimeout(t);
+        if (watched && Date.now() - t0 > SLOW_RPC_MS) console.log('[rpc] медленно', method, (Date.now() - t0) + ' мс');
+        resolve(v);
+      },
+      reject: e => { clearTimeout(t); reject(e); },
+    });
     ws.send(JSON.stringify({ type: 'req', id, method, params }));
   });
 }
@@ -570,6 +586,15 @@ function voiceIdleMs() {
   return Math.round(min * 60 * 1000);
 }
 
+function voiceWarm() {
+  const raw = process.env.LOLKA_VOICE_WARM;
+  return !(raw === '0' || raw === 'off' || raw === 'false');
+}
+
+function voiceWarmLabel(on) {
+  return on ? 'тёплая (сессия живёт, пока бот в комнате)' : 'холодная (сессия только на реплику)';
+}
+
 function voiceIdleLabel(ms) {
   return ms > 0 ? 'выходит после ' + Math.round(ms / 60000) + ' мин тишины' : 'всегда в комнате';
 }
@@ -603,6 +628,7 @@ async function handleCommand(map, cmd, arg) {
         '`/chatadd [new|tree] [имя]` - новый чат в OpenClaw + новый канал в Lolka, привязанные друг к другу',
         '`/vc rooms` - список серверов и голосовых каналов',
         '`/vc idle [мин|0]` - выходить после стольких минут пустоты (0 = всегда в комнате)',
+        '`/vc warm [on|off]` - держать realtime-сессию открытой, пока бот в комнате',
         '`/vc join [канал] [сервер]` - войти в канал (по умолчанию — где сидит владелец)',
         '`/vc status` / `/vc leave` - состояние / выйти из голоса',
         '`/help` - этот список',
@@ -815,6 +841,7 @@ async function handleCommand(map, cmd, arg) {
           if (!voiceRoom) {
             voiceRoom = new VoiceRoom({
               client: lolka, guildId: gId, channelId: chId, req, idleLeaveMs: voiceIdleMs(),
+              keepWarm: voiceWarm(),
               log: m => log('[vc]', m),
             });
           } else if (voiceRoom.state === 'running') {
@@ -831,6 +858,19 @@ async function handleCommand(map, cmd, arg) {
           log('[vc] join failed', e.message);
           await botSend(String(map.channelId), 'не смог войти в голос: ' + String(e.message).slice(0, 300));
         }
+        return;
+      }
+      if (sub === 'warm') {
+        const raw = String(parts[0] || '').trim().toLowerCase();
+        if (!raw) {
+          const cur = voiceRoom ? voiceRoom.keepWarm : voiceWarm();
+          await botSend(String(map.channelId), 'сессия: ' + voiceWarmLabel(cur) + '\n`/vc warm on` — держать открытой, пока в комнате · `/vc warm off` — закрывать после ответа');
+          return;
+        }
+        const on = !(raw === 'off' || raw === '0' || raw === 'false');
+        process.env.LOLKA_VOICE_WARM = on ? '1' : '0';
+        if (voiceRoom) voiceRoom.keepWarm = on;
+        await botSend(String(map.channelId), 'сессия: ' + voiceWarmLabel(on) + (voiceRoom ? ' (применено к текущей комнате)' : ''));
         return;
       }
       if (sub === 'idle' || sub === 'mode') {
@@ -863,6 +903,7 @@ async function handleCommand(map, cmd, arg) {
         '**голос:** ' + st.state,
         'канал: `' + st.channelId + '` · сервер: `' + st.guildId + '`',
         'в комнате людей: ' + st.humans + ' · ' + voiceIdleLabel(st.idleLeaveMs) + (st.emptyForMs ? ' · пусто ' + Math.round(st.emptyForMs / 1000) + ' с' : ''),
+        'сессия: ' + voiceWarmLabel(st.warm) + (st.sessionAgeMs ? ' · возраст ' + Math.round(st.sessionAgeMs / 60000) + ' мин' : '') + (st.warm && st.renewInMs ? ' · до обновления ' + Math.round(st.renewInMs / 60000) + ' мин' : '') + (st.reopens ? ' · переоткрытий ' + st.reopens : ''),
         'сессия: `' + (st.sessionId || '—') + '`',
         'собеседники: ' + (st.speakers.length ? st.speakers.join(', ') : '—'),
         'вход: ' + st.inFrames + ' сэмплов · выход: ' + Math.round(st.outFrames) + ' кадров',
@@ -908,6 +949,15 @@ lolka.once('ready', async c => {
   log('[hook] ready for', MAPPINGS.filter(m => m.webhookUrl).length, '/', MAPPINGS.length);
 });
 
+// ---- вложения (см. media.js) ----------------------------------------------
+const media = createMediaTools({
+  log,
+  lolkaToken,
+  botSend,
+  chunk,
+  getClient: () => lolka,
+});
+const { inboundMedia, sendMediaFiles, extractMedia, attList } = media;
 lolka.on('messageCreate', async msg => {
   try {
     const a = msg.author || {};
@@ -922,7 +972,7 @@ lolka.on('messageCreate', async msg => {
       }
       return;
     }
-    if (!text) return;
+    if (!text && !attList(msg).length) return;
     if (a.username && !OWNER) { OWNER = { username: a.global_name || a.username, avatar: a.avatar, id: a.id }; saveOwner(); }
 
     if (text.startsWith('/')) {
@@ -942,14 +992,20 @@ lolka.on('messageCreate', async msg => {
       return;
     }
 
-    log('[lolka->oc] ' + map.name + ' <' + a.username + '> ' + text.slice(0, 80));
-    recentInbound.set(norm(text), Date.now());
+    const media = await inboundMedia(msg);
+    const head = media.notes.length ? media.notes.join('\n') + '\n' : '';
+    log('[lolka->oc] ' + map.name + ' <' + a.username + '> ' + (text.slice(0, 80) || '(вложение)')
+        + (media.attachments.length ? ' [+' + media.attachments.length + ' файл(ов)]' : ''));
+    if (text) recentInbound.set(norm(text), Date.now());
     typingStart(map.channelId);
-    sendReq('sessions.send', Object.assign({
+    const payload = {
       key: map.sessionKey,
-      message: '[Lolka/' + map.name + '] ' + text,
+      message: '[Lolka/' + map.name + '] ' + head + (text || '(вложение без текста)'),
       idempotencyKey: 'lolka:' + msg.id,
-    }, map.agentId ? { agentId: map.agentId } : {}));
+    };
+    if (map.agentId) payload.agentId = map.agentId;
+    if (media.attachments.length) payload.attachments = media.attachments;
+    sendReq('sessions.send', payload);
   } catch (e) { log('[lolka] handler error', e.message); }
 });
 lolka.on('interactionCreate', async it => {
